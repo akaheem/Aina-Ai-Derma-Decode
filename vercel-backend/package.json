@@ -1,0 +1,13 @@
+{
+  "name": "ainaai-youcam-backend",
+  "version": "1.0.0",
+  "description": "YouCam (Perfect Corp) skin-analysis backend for Aina Ai Derma Decode, deployed on Vercel. Keeps the API key server-side; the Firebase-hosted frontend calls /api/analyze.",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  }
+}

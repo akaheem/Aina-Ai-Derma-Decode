@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="16" fill="#fdf3f3"/>
+  <!-- SmartMirror ring -->
+  <circle cx="32" cy="32" r="19" stroke="#e8607d" stroke-width="4" fill="none" opacity="0.35"/>
+  <!-- Central four-point sparkle: AinaAi's recurring "AI reads your skin" motif -->
+  <path d="M32 15c1.4 6.9 3.8 9.3 10.7 10.7C35.8 27.1 33.4 29.5 32 36.4c-1.4-6.9-3.8-9.3-10.7-10.7C28.2 24.3 30.6 21.9 32 15Z" fill="#e8607d"/>
+  <!-- Small accent sparkle -->
+  <path d="M44 36c.7 3.3 1.8 4.4 5.1 5.1-3.3.7-4.4 1.8-5.1 5.1-.7-3.3-1.8-4.4-5.1-5.1 3.3-.7 4.4-1.8 5.1-5.1Z" fill="#e8607d" opacity="0.7"/>
+</svg>
