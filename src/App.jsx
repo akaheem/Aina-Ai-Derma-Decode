@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { Dashboard } from "./pages/Dashboard";
 import PrivacySettings from "./pages/PrivacySettings";
 import CookieConsentBanner from "./components/CookieConsentBanner";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
 function ProtectedRoute({ children }) {
@@ -49,11 +50,13 @@ function AppRouter() {
 
 export default function App() {
   return (
-    <Router>
-      <AuthProvider>
-        <AppRouter />
-        <CookieConsentBanner />
-      </AuthProvider>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AuthProvider>
+          <AppRouter />
+          <CookieConsentBanner />
+        </AuthProvider>
+      </Router>
+    </ErrorBoundary>
   );
 }

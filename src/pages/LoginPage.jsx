@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { logIn, signUp, signInWithGoogle } from "../auth";
 import { useAuth } from "../contexts/AuthContext";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, Navigate } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { AppHeader } from "../components/AppHeader";
 
@@ -47,8 +47,9 @@ export function LoginPage() {
   const { user } = useAuth();
 
   if (user) {
-    navigate("/dashboard");
-    return null;
+    // Declarative redirect — calling navigate() during render crashed the tree
+    // to a blank page when arriving here via client-side navigation.
+    return <Navigate to="/dashboard" replace />;
   }
 
   const handleSubmit = async (e) => {
