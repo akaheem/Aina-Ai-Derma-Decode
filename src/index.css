@@ -538,6 +538,227 @@ body {
   background: var(--accent-soft);
 }
 
+/* ---------- Secondary button (bordered pill, used by camera + upload) ---------- */
+
+.lk-btn-secondary {
+  height: 48px;
+  padding: 14px 24px;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.lk-btn-secondary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(150, 70, 100, 0.12);
+  background: var(--accent-soft);
+}
+
+/* ---------- Camera capture modal ---------- */
+/* Navbar sits at z-index 100, so the modal layer must clear it. */
+
+.lk-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(46, 31, 36, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.lk-modal-card {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: 28px;
+  max-width: 480px;
+  width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  padding: 24px;
+  box-shadow: 0 24px 64px rgba(150, 70, 100, 0.25);
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+/* Full-viewport sheet on phones, with safe-area padding */
+@media (max-width: 640px) {
+  .lk-modal {
+    padding: 0;
+    align-items: stretch;
+  }
+  .lk-modal-card {
+    max-width: none;
+    border-radius: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  }
+}
+
+.lk-cam-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.lk-cam-title {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.lk-cam-close {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.lk-cam-close:hover {
+  background: var(--accent-soft);
+}
+
+/* Video stage: fixed 3:4 portrait, cover-filled so the oval maps cleanly */
+.lk-cam-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 20px;
+  overflow: hidden;
+  background: #1a1214;
+}
+
+.lk-cam-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* natural selfie framing; capture canvas stays un-mirrored */
+}
+
+.lk-cam-frozen {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lk-cam-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.lk-cam-oval {
+  transition: stroke 0.25s ease;
+}
+
+.lk-cam-countdown {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #fffdfb;
+  background: rgba(46, 31, 36, 0.25);
+}
+
+.lk-cam-count-number {
+  font-family: var(--font-serif);
+  font-size: 64px;
+  font-weight: 700;
+  text-shadow: 0 2px 16px rgba(46, 31, 36, 0.6);
+}
+
+.lk-cam-countdown p {
+  font-size: 15px;
+  font-weight: 600;
+  text-shadow: 0 1px 8px rgba(46, 31, 36, 0.6);
+}
+
+.lk-cam-hint {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  margin: 14px 0;
+}
+
+.lk-cam-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.lk-cam-switch {
+  height: 48px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.lk-cam-switch:hover {
+  color: var(--accent);
+}
+
+.lk-cam-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 28px 20px;
+  border-radius: 20px;
+  background: #fdeaee;
+  border: 1px solid rgba(232, 96, 125, 0.35);
+}
+
+.lk-cam-error-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #a83452;
+  text-align: center;
+}
+
 /* ---------- Trust marquee ---------- */
 
 .lk-trust {

@@ -1,6 +1,8 @@
 import React, { useState, useRef } from "react";
+import { Camera } from "lucide-react";
 import { useSkinAnalysis } from "../hooks/useSkinAnalysis";
 import { ErrorDisplay } from "../components/ErrorDisplay";
+import { CameraCapture } from "../components/CameraCapture";
 import {
   compressImage,
   formatFileSize,
@@ -44,6 +46,7 @@ export function UploadSection() {
   const [compressionProgress, setCompressionProgress] = useState(0);
   const [isCompressing, setIsCompressing] = useState(false);
   const [validationError, setValidationError] = useState(null);
+  const [showCamera, setShowCamera] = useState(false);
   const fileInputRef = useRef(null);
   const { loading: analyzing, analyze, error: analysisError, retry: retryAnalysis, clearError: clearAnalysisError } = useSkinAnalysis();
 
@@ -53,6 +56,7 @@ export function UploadSection() {
   /**
    * Handle file selection with validation and compression
    * @param {File} selectedFile - The file to process
+   * @returns {Promise<File|null>} The compressed file, or null when validation/compression failed
    */
   const processFile = async (selectedFile) => {
     setValidationError(null);
@@ -61,13 +65,13 @@ export function UploadSection() {
     // Validate file type
     if (!["image/jpeg", "image/png", "image/jpg"].includes(selectedFile.type)) {
       setValidationError("Please upload a JPEG or PNG image");
-      return;
+      return null;
     }
 
     // Validate file size (show warning for large files, but still process)
     if (selectedFile.size > 50 * 1024 * 1024) {
       setValidationError("File is too large. Maximum 50MB allowed.");
-      return;
+      return null;
     }
 
     setFile(selectedFile);
@@ -102,10 +106,25 @@ export function UploadSection() {
       });
 
       setIsCompressing(false);
+      return result.compressed;
     } catch (err) {
       setValidationError(err.message);
       setIsCompressing(false);
       setCompressionProgress(0);
+      return null;
+    }
+  };
+
+  /**
+   * Handle a photo coming back from the camera modal: route it through the
+   * same compress pipeline, then flow straight into analysis (no second tap).
+   * @param {File} capturedFile - JPEG File from CameraCapture
+   */
+  const handleCaptured = async (capturedFile) => {
+    setShowCamera(false);
+    const compressed = await processFile(capturedFile);
+    if (compressed) {
+      await analyze(compressed);
     }
   };
 
@@ -348,6 +367,25 @@ export function UploadSection() {
             </button>
           )}
         </div>
+      )}
+
+      {/* Camera capture entry — alternative to file upload */}
+      {!preview && !isProcessing && (
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-px flex-1" style={{ background: "var(--border-soft)" }} aria-hidden="true" />
+          <button
+            className="lk-btn-secondary"
+            onClick={() => setShowCamera(true)}
+            aria-label="Take a photo with your camera"
+          >
+            <Camera size={18} aria-hidden="true" /> Take Photo
+          </button>
+          <div className="h-px flex-1" style={{ background: "var(--border-soft)" }} aria-hidden="true" />
+        </div>
+      )}
+
+      {showCamera && (
+        <CameraCapture onCapture={handleCaptured} onClose={() => setShowCamera(false)} />
       )}
 
       {/* Empty State Help Text */}

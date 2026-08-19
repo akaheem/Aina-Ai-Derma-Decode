@@ -193,7 +193,7 @@ export function AsyncStateView({ loading, error, success, children, onRetry, onD
           </svg>
           <div>
             <h3 className="font-semibold" style={{ color: "#0f7a37" }}>Success!</h3>
-            <p className="text-sm" style={{ color: "#127a3a" }}>Operation completed successfully.</p>
+            <p className="text-sm" style={{ color: "#0f7a37" }}>Operation completed successfully.</p>
           </div>
         </div>
       </div>
