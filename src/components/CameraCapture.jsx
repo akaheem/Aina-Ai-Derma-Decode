@@ -1,19 +1,37 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, X, RefreshCw } from "lucide-react";
+import { Camera, X, RefreshCw, SwitchCamera } from "lucide-react";
 import {
   createDetector,
   evaluateFace,
   isNativeFaceDetectorSupported,
   mapFaceBoxToOverlay,
 } from "../utils/faceGuide";
+import {
+  buildDeviceConstraints,
+  buildFacingConstraints,
+  enumerateVideoDevices,
+  flipFacingMode,
+  getActiveDeviceId,
+  getActualFacingMode,
+  hasMultipleDevices,
+  labelCamera,
+} from "../utils/cameraDevices";
 
 /**
  * CameraCapture — self-contained modal that captures a selfie through
  * getUserMedia with an oval face guide, then hands the JPEG File to the
  * existing compress -> analyze pipeline via onCapture.
  *
- * Auto-capture runs only where window.FaceDetector exists (Chrome/Edge);
- * everywhere else (iOS Safari, Firefox) the user taps Capture manually.
+ * Camera switching: after the first permission grant the modal enumerates the
+ * device's cameras. A flip button (front ⇄ back) appears whenever more than one
+ * camera exists; a lens/camera picker appears when the device exposes more than
+ * a simple pair (Android multi-lens, multi-webcam desktops). The selfie mirror
+ * and FaceDetector auto-capture apply to the FRONT camera only — the rear
+ * camera renders true-orientation and uses the manual Capture button. The
+ * capture canvas is always drawn un-mirrored regardless of preview mirroring.
+ *
+ * Auto-capture runs only where window.FaceDetector exists (Chrome/Edge) AND the
+ * front camera is active; everywhere else the user taps Capture manually.
  *
  * @component
  * @param {Object} props
@@ -29,6 +47,16 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
   const [faceStatus, setFaceStatus] = useState({ status: "none", hint: "Center your face inside the oval" });
   const [frozenUrl, setFrozenUrl] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState(null);
+  // Requested side; used as the mirror/auto-capture signal and as a fallback
+  // when the browser omits facingMode from track settings (common on desktop).
+  const [facingMode, setFacingMode] = useState("user");
+  // Whether the browser actually reports front/back. False on most desktops,
+  // where we lead with the device picker instead of a front/back flip.
+  const [facingKnown, setFacingKnown] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchStatus, setSwitchStatus] = useState(null);
 
   const videoRef = useRef(null);
   const stageRef = useRef(null);
@@ -42,6 +70,10 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
   const goodSinceRef = useRef(null);
   const finishedRef = useRef(false);
   const detectBusyRef = useRef(false);
+  const mountedRef = useRef(true);
+  const switchingRef = useRef(false); // guards re-entrancy without a stale-closure race
+  const switchSeqRef = useRef(0); // only the latest switch may mutate state
+  const statusTimerRef = useRef(null);
   // Keep latest callbacks reachable from long-lived timers without re-subscribing.
   const onCaptureRef = useRef(onCapture);
   const onCloseRef = useRef(onClose);
@@ -49,12 +81,115 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
   onCloseRef.current = onClose;
 
   const autoSupported = isNativeFaceDetectorSupported();
+  const isFront = facingMode === "user";
+  const autoActive = autoSupported && isFront; // auto-capture is front-camera only
+  // Mobile-like (facing known): lead with a front/back flip, show the picker
+  // only for extra lenses. Desktop-like (facing unknown): lead with the picker.
+  const showFlip = facingKnown && hasMultipleDevices(devices);
+  const showPicker = facingKnown ? devices.length > 2 : hasMultipleDevices(devices);
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
+
+  /** Attach a stream to the <video> and start playback (autoplay may reject). */
+  const attachStream = useCallback(async (stream) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = stream;
+    try {
+      await video.play();
+    } catch {
+      /* autoplay can reject until gestures settle; the stream stays live */
+    }
+  }, []);
+
+  const refreshDevices = useCallback(async () => {
+    const list = await enumerateVideoDevices();
+    if (mountedRef.current) setDevices(list);
+  }, []);
+
+  const showStatus = useCallback((message) => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    setSwitchStatus(message);
+    statusTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) setSwitchStatus(null);
+    }, 3500);
+  }, []);
+
+  /**
+   * Switch cameras by acquiring the replacement stream BEFORE stopping the old
+   * one, so a rejected request (e.g. OverconstrainedError) leaves the current
+   * preview live instead of dropping to the error screen. A sequence guard
+   * ensures only the most recent switch mutates state, and teardown mid-switch
+   * stops any orphaned replacement track.
+   *
+   * @param {MediaStreamConstraints} constraints
+   * @param {"user" | "environment"} requestedFacing - fallback when the browser omits facingMode.
+   */
+  const switchTo = useCallback(
+    async (constraints, requestedFacing) => {
+      if (switchingRef.current || finishedRef.current) return;
+      if (!navigator.mediaDevices?.getUserMedia) return;
+
+      const seq = ++switchSeqRef.current;
+      switchingRef.current = true;
+      setSwitching(true);
+      setSwitchStatus(null);
+
+      try {
+        const replacement = await navigator.mediaDevices.getUserMedia(constraints);
+        if (!mountedRef.current || seq !== switchSeqRef.current || finishedRef.current) {
+          replacement.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        const previous = streamRef.current;
+        streamRef.current = replacement;
+        await attachStream(replacement);
+        previous?.getTracks().forEach((t) => t.stop());
+
+        if (!mountedRef.current || seq !== switchSeqRef.current) return;
+        const actual = getActualFacingMode(replacement);
+        const known = actual !== "unknown";
+        setFacingKnown(known);
+        setFacingMode(known ? actual : requestedFacing);
+        setCurrentDeviceId(getActiveDeviceId(replacement));
+        setFaceStatus({ status: "none", hint: "Center your face inside the oval" });
+        goodSinceRef.current = null;
+        await refreshDevices();
+      } catch (err) {
+        if (mountedRef.current && seq === switchSeqRef.current) {
+          showStatus(
+            err?.name === "NotAllowedError"
+              ? "Camera permission was blocked"
+              : "Couldn’t switch — still on your current camera"
+          );
+        }
+      } finally {
+        if (seq === switchSeqRef.current) {
+          switchingRef.current = false;
+          if (mountedRef.current) setSwitching(false);
+        }
+      }
+    },
+    [attachStream, refreshDevices, showStatus]
+  );
+
+  const flipCamera = useCallback(() => {
+    const next = flipFacingMode(facingMode);
+    switchTo(buildFacingConstraints(next), next);
+  }, [facingMode, switchTo]);
+
+  const pickDevice = useCallback(
+    (deviceId) => {
+      if (!deviceId || deviceId === currentDeviceId) return;
+      switchTo(buildDeviceConstraints(deviceId), facingMode);
+    },
+    [currentDeviceId, facingMode, switchTo]
+  );
 
   const clearFrozen = useCallback(() => {
     if (frozenUrlRef.current) URL.revokeObjectURL(frozenUrlRef.current);
@@ -151,6 +286,7 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
   // Camera start (mount only) + full teardown on unmount.
   useEffect(() => {
     let cancelled = false;
+    mountedRef.current = true;
     detectorRef.current = createDetector();
 
     (async () => {
@@ -158,25 +294,21 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
         if (!navigator.mediaDevices?.getUserMedia) {
           throw Object.assign(new Error("getUserMedia unavailable"), { name: "NotSupportedError" });
         }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 1280 } },
-          audio: false,
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(buildFacingConstraints("user"));
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         streamRef.current = stream;
-        const video = videoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          try {
-            await video.play();
-          } catch {
-            /* autoplay can reject until gestures settle; the stream stays live */
-          }
-        }
-        if (!cancelled) setPhase("live");
+        await attachStream(stream);
+        if (cancelled) return;
+        const actual = getActualFacingMode(stream);
+        const known = actual !== "unknown";
+        setFacingKnown(known);
+        setFacingMode(known ? actual : "user");
+        setCurrentDeviceId(getActiveDeviceId(stream));
+        setPhase("live");
+        refreshDevices(); // labels are available now that permission is granted
       } catch (err) {
         if (!cancelled) {
           setCamError(friendlyCameraError(err));
@@ -187,16 +319,18 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
 
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
       stopStream();
       if (frozenUrlRef.current) URL.revokeObjectURL(frozenUrlRef.current);
     };
-  }, [stopStream]);
+  }, [attachStream, refreshDevices, stopStream]);
 
-  // Face-detection loop while live (auto mode only, ~6fps).
+  // Face-detection loop while live (front camera + auto support only, ~6fps).
   useEffect(() => {
-    if (phase !== "live" || !detectorRef.current) return;
+    if (phase !== "live" || !autoActive || !detectorRef.current) return;
     goodSinceRef.current = null;
 
     const tick = async () => {
@@ -213,7 +347,7 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
               video.videoHeight,
               stage.clientWidth,
               stage.clientHeight,
-              true
+              isFront // preview is mirrored only on the front camera
             )
           : null;
         const result = evaluateFace(box);
@@ -239,7 +373,7 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
     };
-  }, [phase, freeze]);
+  }, [phase, autoActive, isFront, freeze]);
 
   // Esc closes; focus lands on the card for keyboard users.
   useEffect(() => {
@@ -257,7 +391,7 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
       ? "Using photo…"
       : phase === "preview"
         ? "Happy with this photo?"
-        : autoSupported
+        : autoActive
           ? faceStatus.hint
           : "Center your face inside the oval, then tap Capture";
 
@@ -288,7 +422,14 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
         ) : (
           <>
             <div className="lk-cam-stage" ref={stageRef}>
-              <video ref={videoRef} className="lk-cam-video" playsInline muted autoPlay aria-hidden="true" />
+              <video
+                ref={videoRef}
+                className={`lk-cam-video${isFront ? " lk-cam-video--mirror" : ""}`}
+                playsInline
+                muted
+                autoPlay
+                aria-hidden="true"
+              />
               {frozenUrl && <img src={frozenUrl} className="lk-cam-frozen" alt="Captured photo preview" />}
               {phase !== "preview" && (
                 <svg className="lk-cam-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -312,6 +453,19 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
                   />
                 </svg>
               )}
+              {phase === "live" && showFlip && (
+                <div className="lk-cam-tools">
+                  <button
+                    className="lk-cam-tool-button"
+                    onClick={flipCamera}
+                    disabled={switching}
+                    aria-label="Switch between front and back camera"
+                    title="Flip camera"
+                  >
+                    <SwitchCamera size={20} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
               {phase === "countdown" && (
                 <div className="lk-cam-countdown" aria-live="assertive">
                   <span className="lk-cam-count-number">{Math.max(secondsLeft, 1)}</span>
@@ -320,13 +474,33 @@ export function CameraCapture({ onCapture, onClose, autoAnalyze = true }) {
               )}
             </div>
 
+            {phase === "live" && showPicker && (
+              <div className="lk-cam-device-picker" role="group" aria-label="Choose a camera">
+                {devices.map((device, index) => (
+                  <button
+                    key={device.deviceId || index}
+                    className="lk-cam-device-chip"
+                    aria-pressed={device.deviceId === currentDeviceId}
+                    onClick={() => pickDevice(device.deviceId)}
+                    disabled={switching || !device.deviceId}
+                  >
+                    {labelCamera(device, index)}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <p className="lk-cam-hint" aria-live="polite">
               {hint}
             </p>
 
+            <p className="lk-cam-status" role="status" aria-live="polite">
+              {switchStatus}
+            </p>
+
             <div className="lk-cam-controls">
               {phase === "live" && (
-                <button className="lk-btn-secondary" onClick={() => freeze("manual")}>
+                <button className="lk-btn-secondary" onClick={() => freeze("manual")} disabled={switching}>
                   <Camera size={18} aria-hidden="true" /> Capture
                 </button>
               )}

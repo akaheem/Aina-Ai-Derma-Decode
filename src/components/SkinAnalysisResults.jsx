@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { getIngredientGuidance } from "../data/ingredients";
+import { getIngredientGuidance, lifestyleGuidance } from "../data/ingredients";
 
 /**
  * Skin Analysis Results — Rose Derma theme.
@@ -287,65 +287,81 @@ export function SkinAnalysisResults({ analysis, imageUrl }) {
  * ingredient database actually covers are shown.
  */
 
-// Map API concern keys → ingredient-database keys.
-const INGREDIENT_KEY = {
-  wrinkle: "wrinkles",
-  wrinkles: "wrinkles",
+// Route every API concern key to its guidance: a topical ingredient-DB key,
+// or a lifestyle key for concerns without a genuine topical fix.
+const CONCERN_GUIDANCE = {
+  wrinkle: { type: "topical", key: "wrinkles", label: "Wrinkles" },
+  firmness: { type: "topical", key: "firmness", label: "Firmness" },
+  texture: { type: "topical", key: "texture", label: "Texture" },
+  pore: { type: "topical", key: "pores", label: "Pores" },
+  oiliness: { type: "topical", key: "oiliness", label: "Oiliness" },
+  acne: { type: "topical", key: "acne", label: "Acne" },
+  redness: { type: "topical", key: "redness", label: "Redness" },
+  age_spot: { type: "topical", key: "age_spots", label: "Age spots" },
+  radiance: { type: "topical", key: "radiance", label: "Radiance" },
+  moisture: { type: "topical", key: "dryness", label: "Dryness" }, // low moisture health = dryness
+  dark_circle_v2: { type: "topical", key: "dark_circles", label: "Dark circles" },
+  eye_bag: { type: "lifestyle", key: "eye_bags", label: "Eye bags" },
+  droopy_upper_eyelid: { type: "lifestyle", key: "droopy_upper_eyelid", label: "Upper eyelid" },
+  droopy_lower_eyelid: { type: "lifestyle", key: "droopy_lower_eyelid", label: "Lower eyelid" },
+};
+
+// Legacy flat severity fields → the API concern key they correspond to.
+const LEGACY_CONCERN_KEY = {
+  wrinkles: "wrinkle",
   redness: "redness",
   oiliness: "oiliness",
   acne: "acne",
-  dark_circle_v2: "dark_circles",
-  dark_circles: "dark_circles",
-  moisture: "dryness", // low moisture health = dryness concern
+  dark_circles: "dark_circle_v2",
 };
 
-const CONCERN_LABEL = {
-  wrinkles: "Wrinkles",
-  redness: "Redness",
-  oiliness: "Oiliness",
-  acne: "Acne",
-  dark_circles: "Dark circles",
-  dryness: "Dryness",
+// Health score (higher = better) → guidance tier. >= 90 is not surfaced.
+const tierFromHealth = (health) => {
+  if (health < 75) return "attention"; // ⚠️ Needs attention
+  if (health < 90) return "monitor"; // 🔎 Room to improve
+  return "great";
 };
 
+/**
+ * Ingredient & lifestyle guidance — Rose Derma theme.
+ *
+ * Surfaces guidance for every concern below a healthy score. Health is read
+ * from the structured `scores` (`uiScore`, higher = better) when present, and
+ * derived from the legacy flat severity fields otherwise. Concerns at health
+ * >= 90 are not shown; a per-concern tier drives the emphasis:
+ *   - health < 75  → "Needs attention" (⚠️)
+ *   - health 75-89 → "Room to improve" (🔎)
+ * Topical concerns render an ingredient list; concerns without a real topical
+ * fix (eye bags, eyelid droop) render honest lifestyle/professional tips.
+ * The all-clear message shows only when every covered concern is >= 90.
+ */
 export function IngredientGuidance({ analysis }) {
   const [expandedConcerns, setExpandedConcerns] = useState({});
   if (!analysis) return null;
 
-  // Collect { ingredientKey, severity } for covered concerns, worst first.
   const scores = analysis.scores && typeof analysis.scores === "object" ? analysis.scores : null;
-  const bySeverity = new Map();
 
-  const consider = (ingredientKey, severity) => {
-    const sev = clampScore(severity);
-    if (sev < 50) return; // only surface monitor/high concerns
-    const prev = bySeverity.get(ingredientKey);
-    if (prev == null || sev > prev) bySeverity.set(ingredientKey, sev);
-  };
-
+  // Collect { apiKey, guidance, health } for every recognized concern.
+  const collected = [];
   if (scores) {
     for (const [apiKey, val] of Object.entries(scores)) {
-      const ik = INGREDIENT_KEY[apiKey];
-      if (!ik) continue;
-      const severity = val.severity ?? 100 - clampScore(val.uiScore);
-      consider(ik, severity);
+      const guidance = CONCERN_GUIDANCE[apiKey];
+      if (!guidance || !val) continue;
+      const health = val.uiScore != null ? clampScore(val.uiScore) : 100 - clampScore(val.severity);
+      collected.push({ apiKey, guidance, health });
     }
   } else {
-    consider("wrinkles", analysis.wrinkles);
-    consider("redness", analysis.redness);
-    consider("oiliness", analysis.oiliness);
-    if (analysis.acne != null) consider("acne", analysis.acne);
-    if (analysis.dark_circles != null) consider("dark_circles", analysis.dark_circles);
+    for (const [flatKey, apiKey] of Object.entries(LEGACY_CONCERN_KEY)) {
+      const sev = analysis[flatKey];
+      if (sev == null) continue;
+      const guidance = CONCERN_GUIDANCE[apiKey];
+      if (!guidance) continue;
+      collected.push({ apiKey, guidance, health: 100 - clampScore(sev) }); // flat fields are severities
+    }
   }
 
-  const concerns = [...bySeverity.entries()]
-    .map(([key, value]) => ({
-      key,
-      name: CONCERN_LABEL[key] || key,
-      value,
-      severity: value >= 75 ? "high" : "medium",
-    }))
-    .sort((a, b) => b.value - a.value);
+  // Only surface concerns below healthy; worst (lowest health) first.
+  const concerns = collected.filter((c) => c.health < 90).sort((a, b) => a.health - b.health);
 
   if (concerns.length === 0) {
     return (
@@ -367,28 +383,32 @@ export function IngredientGuidance({ analysis }) {
   };
 
   return (
-    <div className="space-y-3 sm:space-y-6" role="region" aria-label="Ingredient recommendations for skin concerns">
-      {concerns.map((concern) => {
-        const ingredients = getIngredientGuidance(concern.key, concern.severity);
-        const isExpanded = expandedConcerns[concern.key] !== false; // default expanded
+    <div className="space-y-3 sm:space-y-6" role="region" aria-label="Guidance for skin concerns">
+      {concerns.map(({ apiKey, guidance, health }) => {
+        const tier = tierFromHealth(health);
+        const isAttention = tier === "attention";
+        const isExpanded = expandedConcerns[apiKey] !== false; // default expanded
+        const bodyId = `guidance-${apiKey}`;
+        const ingredients = guidance.type === "topical" ? getIngredientGuidance(guidance.key, "high") : null;
+        const lifestyle = guidance.type === "lifestyle" ? lifestyleGuidance[guidance.key] : null;
 
         return (
-          <div key={concern.key} className="rounded-2xl overflow-hidden" style={{ background: "var(--card)", border: "1px solid var(--border-soft)" }}>
+          <div key={apiKey} className="rounded-2xl overflow-hidden" style={{ background: "var(--card)", border: "1px solid var(--border-soft)" }}>
             <button
-              onClick={() => toggleConcern(concern.key)}
+              onClick={() => toggleConcern(apiKey)}
               className="w-full px-4 sm:px-6 py-4 sm:py-5 transition text-left flex items-start gap-3 min-h-[48px]"
               aria-expanded={isExpanded}
-              aria-controls={`ingredients-${concern.key}`}
+              aria-controls={bodyId}
             >
               <span className="text-2xl sm:text-3xl flex-shrink-0" aria-hidden="true">
-                {concern.severity === "high" ? "⚠️" : "🔎"}
+                {isAttention ? "⚠️" : "🔎"}
               </span>
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-base sm:text-lg" style={{ color: "var(--text)" }}>
-                  {concern.name} {concern.severity === "high" ? "needs attention" : "to monitor"}
+                  {guidance.label} {isAttention ? "needs attention" : "— room to improve"}
                 </h3>
                 <p className="text-xs sm:text-sm" style={{ color: "var(--muted)" }}>
-                  Concern level: {concern.value}%
+                  Skin health: {health}%
                 </p>
               </div>
               <svg
@@ -404,26 +424,49 @@ export function IngredientGuidance({ analysis }) {
             </button>
 
             {isExpanded && (
-              <div id={`ingredients-${concern.key}`} className="px-4 sm:px-6 py-4 sm:py-5 space-y-4" style={{ borderTop: "1px solid var(--border-soft)" }}>
-                <div>
-                  <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Recommended ingredients</p>
-                  <div className="space-y-2 sm:space-y-3">
-                    {ingredients?.map((ingredient, idx) => (
-                      <div key={idx} className="rounded-xl p-3 sm:p-4" style={{ background: "var(--bg)", border: "1px solid var(--border-soft)" }}>
-                        <p className="font-medium text-sm sm:text-base" style={{ color: "var(--text)" }}>✓ {ingredient.name}</p>
-                        <p className="text-xs sm:text-sm mt-1" style={{ color: "var(--muted)" }}>{ingredient.benefit}</p>
-                        <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
-                          <span className="font-semibold" style={{ color: "var(--text)" }}>How to use:</span> {ingredient.how}
-                        </p>
+              <div id={bodyId} className="px-4 sm:px-6 py-4 sm:py-5 space-y-4" style={{ borderTop: "1px solid var(--border-soft)" }}>
+                {guidance.type === "topical" ? (
+                  <>
+                    <div>
+                      <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Recommended ingredients</p>
+                      <div className="space-y-2 sm:space-y-3">
+                        {ingredients?.map((ingredient, idx) => (
+                          <div key={idx} className="rounded-xl p-3 sm:p-4" style={{ background: "var(--bg)", border: "1px solid var(--border-soft)" }}>
+                            <p className="font-medium text-sm sm:text-base" style={{ color: "var(--text)" }}>✓ {ingredient.name}</p>
+                            <p className="text-xs sm:text-sm mt-1" style={{ color: "var(--muted)" }}>{ingredient.benefit}</p>
+                            <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
+                              <span className="font-semibold" style={{ color: "var(--text)" }}>How to use:</span> {ingredient.how}
+                            </p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
 
-                <div className="p-3 sm:p-4 rounded-xl" style={{ background: "rgba(217,131,36,0.1)", borderLeft: "4px solid #d98324" }} role="alert">
-                  <p className="text-xs sm:text-sm font-semibold mb-1" style={{ color: "#8a5410" }}>⚠️ Things to avoid</p>
-                  <p className="text-xs sm:text-sm" style={{ color: "#8a5410" }}>{ingredients?.[0]?.avoid}</p>
-                </div>
+                    {ingredients?.[0]?.avoid && (
+                      <div className="p-3 sm:p-4 rounded-xl" style={{ background: "rgba(217,131,36,0.1)", borderLeft: "4px solid #d98324" }} role="alert">
+                        <p className="text-xs sm:text-sm font-semibold mb-1" style={{ color: "#8a5410" }}>⚠️ Things to avoid</p>
+                        <p className="text-xs sm:text-sm" style={{ color: "#8a5410" }}>{ingredients[0].avoid}</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {lifestyle?.note && (
+                      <p className="text-sm" style={{ color: "var(--muted)" }}>{lifestyle.note}</p>
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>What can help</p>
+                      <ul className="space-y-2">
+                        {lifestyle?.tips?.map((tip, idx) => (
+                          <li key={idx} className="flex items-start gap-2 text-xs sm:text-sm" style={{ color: "var(--muted)" }}>
+                            <span aria-hidden="true" style={{ color: "var(--accent)" }}>•</span>
+                            <span>{tip}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>

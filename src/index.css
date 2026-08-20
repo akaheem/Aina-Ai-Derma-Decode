@@ -655,7 +655,12 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* natural selfie framing; capture canvas stays un-mirrored */
+}
+
+/* Selfie mirror — front camera only. Rear camera renders true-orientation.
+   The capture canvas is always drawn un-mirrored regardless of this class. */
+.lk-cam-video--mirror {
+  transform: scaleX(-1);
 }
 
 .lk-cam-frozen {
@@ -739,6 +744,101 @@ body {
 
 .lk-cam-switch:hover {
   color: var(--accent);
+}
+
+/* ---- Camera switch controls (flip + lens picker) ---- */
+
+/* Floating tool column, top-right of the video stage. */
+.lk-cam-tools {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 2;
+}
+
+.lk-cam-tool-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 253, 251, 0.35);
+  background: rgba(46, 31, 36, 0.55);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  color: #fffdfb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.lk-cam-tool-button:hover:not(:disabled) {
+  background: rgba(232, 96, 125, 0.85);
+  transform: translateY(-1px);
+}
+
+.lk-cam-tool-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Horizontal, scrollable chip row for choosing a specific camera/lens. */
+.lk-cam-device-picker {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  margin-top: 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lk-cam-device-picker::-webkit-scrollbar {
+  display: none;
+}
+
+.lk-cam-device-chip {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.lk-cam-device-chip:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.lk-cam-device-chip[aria-pressed="true"] {
+  background: var(--button-bg);
+  border-color: var(--button-bg);
+  color: var(--button-text);
+}
+
+.lk-cam-device-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Transient status line for switching / fallback feedback (aria-live). */
+.lk-cam-status {
+  min-height: 20px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 4px 0 0;
 }
 
 .lk-cam-error {
